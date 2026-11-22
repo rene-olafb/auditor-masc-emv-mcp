@@ -12,7 +12,15 @@ from simulador_emv import (
     simular_matriz_sensibilidad_emv as _simular_matriz_emv,
 )
 
-mcp = MCPServer("AuditorMASCyEMV")
+try:
+    mcp = MCPServer("AuditorMASCyEMV", version="0.3.1")
+except TypeError:
+    mcp = MCPServer("AuditorMASCyEMV")
+    for attr in ("_lowlevel_server", "_mcp_server", "server"):
+        interno = getattr(mcp, attr, None)
+        if interno is not None and hasattr(interno, "version"):
+            interno.version = "0.3.1"
+            break
 
 
 @mcp.tool()
@@ -39,17 +47,15 @@ def auditar_clausula_masc(
     texto_documento: Optional[str] = None,
 ) -> dict:
     """
-    Audita una cláusula MASC o arbitral verificando evidencia literal y respaldo léxico
-    por cada atributo declarado, cobertura documental y reglas calibradas al Título
-    Cuarto del Libro Quinto del Código de Comercio.
+    Audita una cláusula MASC o arbitral verificando localización literal, coincidencia léxica,
+    detección de negaciones/exclusiones por atributo y reglas calibradas al Código de Comercio.
 
     REGLAS CRÍTICAS:
     1. Declara estado='presente' únicamente para atributos respaldados por un fragmento
-       literal del documento ('cita_literal'). Si un dato no aparece tras revisar,
-       usa 'ausente_tras_revision'; si no se revisó, usa 'no_determinado'.
+       literal del documento ('cita_literal').
     2. Nunca inventes palabras ni completes atributos por suposición.
     3. Si el motor devuelve 'REQUIERE_REVISION' o 'CITA_NO_VERIFICADA', informa al
-       usuario qué atributos carecen de respaldo o requieren cotejo humano.
+       usuario qué atributos requieren cotejo humano.
     """
     payload = (
         datos_clausula.model_dump()
@@ -68,8 +74,8 @@ def simular_batna_emv(parametros: ParametrosLitigioEMV) -> dict:
     """
     Modela determinísticamente en Decimal el Valor Presente Neto (VPN) de litigar
     frente a convenir en MASC, contabilizando costas reembolsables entre partes,
-    redondeo conservador al centavo (piso CEILING, techo FLOOR) y causa económica
-    explícita si no existe ZOPA.
+    identidad exacta cuando J == T, redondeo conservador al centavo y consistencia
+    estratégica ante retiro del actor.
     """
     payload = (
         parametros.model_dump()
