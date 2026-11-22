@@ -7,11 +7,14 @@ from docx import Document
 import servidor_mcp
 from lector_documentos import extraer_documento, verificar_cita_en_texto
 from auditor_masc import auditar_clausula_masc
-from simulador_emv import simular_escenario_batna_emv
+from simulador_emv import (
+    simular_escenario_batna_emv,
+    simular_matriz_sensibilidad_emv,
+)
 
 
-class TestAuditorMASCyEMVv01(unittest.TestCase):
-    """Suite de regresión v0.1: ingesta documental, evidence spans, patologías y EMV/VPN."""
+class TestAuditorMASCyEMVv02(unittest.TestCase):
+    """Suite de regresión v0.2: ingesta DOCX (párrafos y tablas), evidence spans, patologías y EMV/VPN."""
 
     def test_01_extraccion_docx_real_en_disco(self):
         """Lee un contrato .docx real y extrae párrafos numerados."""
@@ -252,7 +255,121 @@ class TestAuditorMASCyEMVv01(unittest.TestCase):
         })
         self.assertEqual(res_nan["estado"], "ERROR_VALIDACION")
 
-    def test_14_paridad_esquema_mcp_y_nucleo(self):
+    def test_14_extraccion_tablas_docx_y_deduplicacion_celdas_combinadas(self):
+        """Extrae cláusulas alojadas dentro de tablas .docx sin duplicar celdas combinadas."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ruta = Path(tmpdir) / "caratula_contrato.docx"
+            doc = Document()
+            doc.add_paragraph("CARÁTULA DE SERVICIOS")
+            tabla = doc.add_table(rows=2, cols=2)
+            tabla.cell(0, 0).merge(tabla.cell(0, 1))
+            tabla.cell(0, 0).text = "CLÁUSULA ARBITRAL EN ANEXO"
+            tabla.cell(1, 0).text = "Sede"
+            tabla.cell(1, 1).text = "Arbitraje ante CAM en Guadalajara, Jalisco."
+            doc.save(ruta)
+
+            res = extraer_documento(str(ruta))
+            self.assertEqual(res["estado"], "OK")
+            self.assertEqual(res["total_bloques"], 3)
+            self.assertEqual(res["texto_completo"].count("CLÁUSULA ARBITRAL EN ANEXO"), 1)
+            self.assertIn("Arbitraje ante CAM en Guadalajara, Jalisco.", res["texto_completo"])
+
+    def test_15_auditoria_directa_desde_ruta_docx_con_tabla(self):
+        """Valida cita literal extraída desde una celda de tabla en un .docx real."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ruta = Path(tmpdir) / "contrato_tabla.docx"
+            doc = Document()
+            tabla = doc.add_table(rows=1, cols=2)
+            tabla.cell(0, 0).text = "Solución de controversias"
+            cita = "Toda disputa se resolverá por arbitraje institucional en el CAM con sede en Zapopan."
+            tabla.cell(0, 1).text = cita
+            doc.save(ruta)
+
+            res = auditar_clausula_masc(
+                datos_clausula={
+                    "mecanismo_principal": "arbitraje",
+                    "institucion_administradora": "CAM",
+                    "sede_arbitraje": "Zapopan",
+                    "idioma": "Español",
+                    "ley_aplicable_fondo": "Código de Comercio",
+                    "numero_arbitros": 1,
+                    "cita_textual_clausula": cita,
+                },
+                ruta_archivo=str(ruta),
+            )
+            self.assertEqual(res["estado"], "CLAUSULA_SIN_ALERTAS_AUTOMATICAS")
+            self.assertTrue(res["cita_verificada_en_fuente"])
+
+    def test_16_matriz_sensibilidad_emv_escenarios_default(self):
+        """Evalúa los 4 escenarios por defecto (0.35, 0.50, 0.65, 0.80) y verifica paridad exacta."""
+        res = simular_matriz_sensibilidad_emv({
+            "monto_reclamado_mxn": "1000000",
+            "costos_litigio_actor_mxn": "120000",
+            "costos_litigio_demandado_mxn": "150000",
+            "duracion_juicio_meses": 24,
+            "tasa_descuento_anual": "0.10",
+            "costos_masc_actor_mxn": "25000",
+            "costos_masc_demandado_mxn": "25000",
+        })
+        self.assertEqual(res["estado"], "OK")
+        self.assertEqual(res["resumen"]["total_escenarios"], 4)
+        self.assertEqual(res["resumen"]["escenarios_con_zopa"], 4)
+        fila_65 = res["matriz_escenarios"][2]
+        self.assertEqual(fila_65["probabilidad_exito_actor"], "0.65")
+        self.assertEqual(fila_65["piso_actor_masc_mxn"], "445716.17")
+        self.assertEqual(fila_65["techo_demandado_masc_mxn"], "667470.48")
+
+    def test_17_matriz_sensibilidad_emv_lista_personalizada_sin_zopa(self):
+        """Evalúa una lista personalizada de probabilidades en escenario sin ZOPA."""
+        res = simular_matriz_sensibilidad_emv({
+            "monto_reclamado_mxn": "500000",
+            "probabilidades_exito_actor": ["0.25", "0.75"],
+            "costos_litigio_actor_mxn": "5000",
+            "costos_litigio_demandado_mxn": "5000",
+            "duracion_juicio_meses": 12,
+            "tasa_descuento_anual": "0.05",
+            "costos_masc_actor_mxn": "40000",
+            "costos_masc_demandado_mxn": "40000",
+        })
+        self.assertEqual(res["estado"], "OK")
+        self.assertEqual(res["resumen"]["total_escenarios"], 2)
+        self.assertEqual(res["resumen"]["escenarios_sin_zopa"], 2)
+
+    def test_18_matriz_sensibilidad_rechaza_probabilidades_invalidas(self):
+        """Rechaza lista vacía o probabilidades fuera de [0, 1] o booleanas."""
+        res_vacia = simular_matriz_sensibilidad_emv({
+            "monto_reclamado_mxn": "100000",
+            "probabilidades_exito_actor": [],
+            "costos_litigio_actor_mxn": "10000",
+            "costos_litigio_demandado_mxn": "10000",
+            "duracion_juicio_meses": 12,
+            "tasa_descuento_anual": "0.10",
+            "costos_masc_actor_mxn": "2000",
+            "costos_masc_demandado_mxn": "2000",
+        })
+        self.assertEqual(res_vacia["estado"], "ERROR_VALIDACION")
+
+        res_bool = simular_matriz_sensibilidad_emv({
+            "monto_reclamado_mxn": "100000",
+            "probabilidades_exito_actor": [True],
+            "costos_litigio_actor_mxn": "10000",
+            "costos_litigio_demandado_mxn": "10000",
+            "duracion_juicio_meses": 12,
+            "tasa_descuento_anual": "0.10",
+            "costos_masc_actor_mxn": "2000",
+            "costos_masc_demandado_mxn": "2000",
+        })
+        self.assertEqual(res_bool["estado"], "ERROR_VALIDACION")
+
+    def test_19_pdf_sin_texto_extraible_fail_closed(self):
+        """Verifica que un archivo .pdf corrupto o sin capa de texto falle de forma controlada."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ruta_pdf = Path(tmpdir) / "corrupto.pdf"
+            ruta_pdf.write_bytes(b"%PDF-1.4 contenido_invalido")
+            res = extraer_documento(str(ruta_pdf))
+            self.assertIn(res["estado"], {"ERROR_LECTURA", "PDF_SIN_TEXTO_EXTRAIBLE"})
+
+    def test_20_paridad_esquema_mcp_y_nucleo(self):
         """Verifica que servidor_mcp.py exponga exactamente los mismos parámetros que el núcleo."""
         self.assertEqual(
             list(inspect.signature(extraer_documento).parameters.keys()),
@@ -265,6 +382,10 @@ class TestAuditorMASCyEMVv01(unittest.TestCase):
         self.assertEqual(
             list(inspect.signature(simular_escenario_batna_emv).parameters.keys()),
             list(inspect.signature(servidor_mcp.simular_batna_emv).parameters.keys()),
+        )
+        self.assertEqual(
+            list(inspect.signature(simular_matriz_sensibilidad_emv).parameters.keys()),
+            list(inspect.signature(servidor_mcp.simular_matriz_sensibilidad_emv).parameters.keys()),
         )
 
 

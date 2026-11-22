@@ -24,10 +24,34 @@ def verificar_cita_en_texto(cita_textual: str, texto_documento: str) -> bool:
     return cita_norm in doc_norm
 
 
+def _extraer_bloques_docx(ruta: Path) -> list[str]:
+    """Extrae párrafos y filas de tablas de un .docx deduplicando celdas combinadas."""
+    doc = Document(ruta)
+    bloques = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+
+    for t_idx, tabla in enumerate(doc.tables, start=1):
+        for r_idx, fila in enumerate(tabla.rows, start=1):
+            celdas_unicas = []
+            vistos = set()
+            for celda in fila.cells:
+                if celda._tc in vistos:
+                    continue
+                vistos.add(celda._tc)
+                texto_celda = normalizar_espacios(celda.text)
+                if texto_celda:
+                    celdas_unicas.append(texto_celda)
+            if celdas_unicas:
+                bloques.append(
+                    f"[Tabla {t_idx}, Fila {r_idx}] {' | '.join(celdas_unicas)}"
+                )
+    return bloques
+
+
 def extraer_documento(ruta_archivo: str) -> dict:
     """
-    Extrae texto estructurado por bloques/párrafos desde un archivo .txt, .docx o .pdf.
-    Opera en modo Fail-Closed ante PDFs escaneados sin texto o rutas inválidas.
+    Extrae texto estructurado por bloques (párrafos, tablas o páginas) desde un
+    archivo .txt, .docx o .pdf. Opera en modo Fail-Closed ante PDFs escaneados sin
+    texto o rutas inválidas.
     """
     ruta = Path(ruta_archivo).expanduser()
 
@@ -62,8 +86,7 @@ def extraer_documento(ruta_archivo: str) -> dict:
             contenido = ruta.read_text(encoding="utf-8")
             bloques = [p.strip() for p in contenido.splitlines() if p.strip()]
         elif extension == ".docx":
-            doc = Document(ruta)
-            bloques = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+            bloques = _extraer_bloques_docx(ruta)
         elif extension == ".pdf":
             lector = PdfReader(ruta)
             for idx, pagina in enumerate(lector.pages, start=1):

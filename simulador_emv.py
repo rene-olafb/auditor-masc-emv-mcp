@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 from pydantic import ValidationError
-from esquemas import ParametrosLitigioEMV
+from esquemas import ParametrosLitigioEMV, ParametrosSensibilidadEMV
 
 CENTAVO = Decimal("0.01")
 
@@ -59,11 +59,8 @@ def simular_escenario_batna_emv(parametros: dict) -> dict:
     batna_vpn_costo_demandado = vp_condena_demandado + p.costos_litigio_demandado_mxn
 
     # 3. Puntos de indiferencia para convenio en MASC (en el momento duracion_masc_meses)
-    # Actor: S / factor_masc - costos_masc_actor >= batna_vpn_actor
     punto_indiferencia_actor = (batna_vpn_actor + p.costos_masc_actor_mxn) * factor_masc
     minimo_aceptable_actor = max(Decimal("0.00"), punto_indiferencia_actor)
-
-    # Demandado: S / factor_masc + costos_masc_demandado <= batna_vpn_costo_demandado
     maximo_pagable_demandado = (batna_vpn_costo_demandado - p.costos_masc_demandado_mxn) * factor_masc
 
     # 4. Cálculo de ZOPA (Zona de Posible Acuerdo)
@@ -109,5 +106,53 @@ def simular_escenario_batna_emv(parametros: dict) -> dict:
             "Las probabilidades de éxito, duración y tasas de descuento son supuestos "
             "subjetivos aportados por el usuario; el motor garantiza consistencia aritmética, "
             "no predicción estadística del resultado judicial."
+        ),
+    }
+
+
+def simular_matriz_sensibilidad_emv(parametros: dict) -> dict:
+    """
+    Ejecuta el motor determinista BATNA/EMV sobre una lista de probabilidades de
+    éxito (por defecto 0.35, 0.50, 0.65 y 0.80) para observar el desplazamiento de la ZOPA.
+    """
+    try:
+        p = ParametrosSensibilidadEMV(**parametros)
+    except ValidationError as exc:
+        return {
+            "estado": "ERROR_VALIDACION",
+            "mensaje": "Los parámetros de la matriz de sensibilidad no cumplen la validación.",
+            "errores": exc.errors(include_url=False),
+        }
+
+    base = p.model_dump(exclude={"probabilidades_exito_actor"})
+    escenarios = []
+    con_zopa = 0
+
+    for prob in p.probabilidades_exito_actor:
+        res = simular_escenario_batna_emv({**base, "probabilidad_exito_actor": prob})
+        if res["estado"] == "ZOPA_VIABLE":
+            con_zopa += 1
+        escenarios.append({
+            "probabilidad_exito_actor": str(prob),
+            "estado": res["estado"],
+            "batna_vpn_actor_mxn": res["actor"]["batna_vpn_litigio_mxn"],
+            "piso_actor_masc_mxn": res["actor"]["minimo_racional_aceptable_masc_mxn"],
+            "techo_demandado_masc_mxn": res["demandado"]["maximo_racional_ofertable_masc_mxn"],
+            "amplitud_zopa_mxn": res["negociacion_masc"]["amplitud_zopa_mxn"],
+            "punto_medio_referencia_mxn": res["negociacion_masc"]["punto_medio_referencia_mxn"],
+            "litigio_tiene_valor_esperado_negativo": res["actor"]["litigio_tiene_valor_esperado_negativo"],
+        })
+
+    return {
+        "estado": "OK",
+        "resumen": {
+            "total_escenarios": len(escenarios),
+            "escenarios_con_zopa": con_zopa,
+            "escenarios_sin_zopa": len(escenarios) - con_zopa,
+        },
+        "matriz_escenarios": escenarios,
+        "convencion_financiera": (
+            "Cada fila aplica la misma convención Decimal (ROUND_HALF_UP) con descuento "
+            "efectivo anual (1+r)^(t/12) e imputación de costos en valor presente."
         ),
     }

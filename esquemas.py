@@ -122,3 +122,63 @@ class ParametrosLitigioEMV(BaseModel):
     @classmethod
     def _parsear_enteros(cls, v):
         return _rechazar_booleano_en_entero(v)
+
+
+class ParametrosSensibilidadEMV(BaseModel):
+    """
+    Insumos para evaluar una matriz de sensibilidad BATNA/ZOPA variando
+    múltiples probabilidades de éxito en una sola corrida determinista.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    monto_reclamado_mxn: Decimal = Field(..., gt=0)
+    probabilidades_exito_actor: list[Decimal] = Field(
+        default_factory=lambda: [
+            Decimal("0.35"),
+            Decimal("0.50"),
+            Decimal("0.65"),
+            Decimal("0.80"),
+        ],
+        min_length=1,
+        max_length=10,
+    )
+    costos_litigio_actor_mxn: Decimal = Field(..., ge=0)
+    costos_litigio_demandado_mxn: Decimal = Field(..., ge=0)
+    duracion_juicio_meses: int = Field(..., ge=1, le=120)
+    tasa_descuento_anual: Decimal = Field(..., ge=0, le=1)
+    costos_masc_actor_mxn: Decimal = Field(..., ge=0)
+    costos_masc_demandado_mxn: Decimal = Field(..., ge=0)
+    duracion_masc_meses: int = Field(default=1, ge=0, le=24)
+    riesgo_costas_perdedor_mxn: Decimal = Field(default=Decimal("0.00"), ge=0)
+
+    @field_validator(
+        "monto_reclamado_mxn",
+        "costos_litigio_actor_mxn",
+        "costos_litigio_demandado_mxn",
+        "tasa_descuento_anual",
+        "costos_masc_actor_mxn",
+        "costos_masc_demandado_mxn",
+        "riesgo_costas_perdedor_mxn",
+        mode="before",
+    )
+    @classmethod
+    def _parsear_decimales(cls, v):
+        return _validar_decimal_finito(v)
+
+    @field_validator("probabilidades_exito_actor", mode="before")
+    @classmethod
+    def _parsear_lista_probabilidades(cls, v):
+        if not isinstance(v, list):
+            raise ValueError("'probabilidades_exito_actor' debe ser una lista.")
+        resultado = []
+        for item in v:
+            dec = _validar_decimal_finito(item)
+            if dec < Decimal("0") or dec > Decimal("1"):
+                raise ValueError("Cada probabilidad debe estar entre 0 y 1.")
+            resultado.append(dec)
+        return resultado
+
+    @field_validator("duracion_juicio_meses", "duracion_masc_meses", mode="before")
+    @classmethod
+    def _parsear_enteros(cls, v):
+        return _rechazar_booleano_en_entero(v)

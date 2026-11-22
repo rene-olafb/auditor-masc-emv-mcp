@@ -2,7 +2,10 @@ from typing import Optional
 from mcp.server.mcpserver import MCPServer
 from lector_documentos import extraer_documento
 from auditor_masc import auditar_clausula_masc as _auditar_clausula
-from simulador_emv import simular_escenario_batna_emv as _simular_emv
+from simulador_emv import (
+    simular_escenario_batna_emv as _simular_emv,
+    simular_matriz_sensibilidad_emv as _simular_matriz_emv,
+)
 
 mcp = MCPServer("AuditorMASCyEMV")
 
@@ -10,7 +13,8 @@ mcp = MCPServer("AuditorMASCyEMV")
 @mcp.tool()
 def leer_documento_contrato(ruta_archivo: str) -> dict:
     """
-    Extrae el texto estructurado por párrafos de un contrato en formato .txt, .docx o .pdf.
+    Extrae el texto estructurado por párrafos y tablas de un contrato en formato
+    .txt, .docx o .pdf.
     REGLA CRÍTICA:
     - Si devuelve 'PDF_SIN_TEXTO_EXTRAIBLE', 'ERROR_ARCHIVO' o 'FUERA_DE_ALCANCE',
       DETENTE e informa al usuario. PROHIBIDO inventar el contenido del documento.
@@ -76,6 +80,17 @@ def simular_batna_emv(parametros: dict) -> dict:
     - riesgo_costas_perdedor_mxn (>= 0, default '0.00')
     """
     return _simular_emv(parametros=parametros)
+
+
+@mcp.tool()
+def simular_matriz_sensibilidad_emv(parametros: dict) -> dict:
+    """
+    Evalúa en una sola corrida múltiples probabilidades de éxito (por defecto
+    ['0.35', '0.50', '0.65', '0.80']) para mostrar cómo se desplazan el BATNA y la ZOPA.
+    Acepta las mismas claves base que 'simular_batna_emv' sustituyendo
+    'probabilidad_exito_actor' por la lista opcional 'probabilidades_exito_actor'.
+    """
+    return _simular_matriz_emv(parametros=parametros)
 
 
 if __name__ == "__main__":

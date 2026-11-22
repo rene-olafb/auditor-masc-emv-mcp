@@ -23,5 +23,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ejecutar 14 pruebas unitarias
+      - name: Ejecutar 20 pruebas unitarias
         run: python test_suite.py
