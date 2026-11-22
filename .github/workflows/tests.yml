@@ -23,5 +23,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ejecutar 20 pruebas unitarias
+      - name: Ejecutar 24 pruebas unitarias y de integracion MCP
         run: python test_suite.py
